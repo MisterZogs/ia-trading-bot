@@ -123,4 +123,4 @@ ATR_TP_MIN_PCT = 0.03   # TP minimum garanti = +3% (si ATR anormalement faible)
 LOOP_INTERVAL_SECONDS = 60  # Vérifie chaque minute si une nouvelle bougie est fermée
 
 # Nombre de bougies historiques à charger pour les indicateurs
-CANDLES_LIMIT = 200
+CANDLES_LIMIT = 500

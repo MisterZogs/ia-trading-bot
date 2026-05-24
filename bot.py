@@ -194,9 +194,10 @@ class TradingBot:
     # Export position vers fichier JSONL
     # ------------------------------------------------------------------ #
     def _export(self, event: dict):
+        import numpy as np
         event["ts"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with open(TRADES_LOG, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event) + "\n")
+            f.write(json.dumps(event, default=lambda o: int(o) if isinstance(o, np.integer) else float(o) if isinstance(o, np.floating) else o) + "\n")
 
     # ------------------------------------------------------------------ #
     # Notifications Telegram
@@ -593,9 +594,6 @@ class TradingBot:
 
             if iteration % 10 == 0:
                 self.print_status()
-                summary = self.risk.summary()
-                if summary["open_positions"] > 0 or len(self.trade_log) > 0:
-                    self._send_status_telegram()
 
             # Résumé quotidien à 9h heure française
             now_paris = datetime.now(PARIS_TZ)
