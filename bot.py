@@ -30,18 +30,20 @@ from dotenv import load_dotenv
 
 import config
 import indicators
+import data_cache
 import fear_greed as fg_module
+import multi_sim as ms
 from risk_manager import RiskManager
 
 init(autoreset=True)
 load_dotenv()
 
 # ---------------------------------------------------------------------------
-# Stratégie active : Top 20 / 1pos / sansSL / 12h / baseline / 10%/max10
-# Backtest 2021 : +93.6% | Win 72.2% | DD 35% | Excel row 616
+# Stratégie active : Top 20 / multi / sansSL / 30m / +TripleST / pondéré-strict
+# Backtest 2023 : +54% | Win 31% | DD 29% | Excel row 1623
 # ---------------------------------------------------------------------------
-USE_SMA_MACD  = False   # baseline : pas de filtre SMA/MACD
-USE_TRIPLE_ST = False   # baseline : pas de filtre Triple SuperTrend
+USE_SMA_MACD  = True    # +TripleST : filtre SMA/MACD actif
+USE_TRIPLE_ST = True    # +TripleST : filtre Triple SuperTrend actif
 USE_SL        = False   # sansSL : sortie sur signal SELL ou TP uniquement
 
 LIVE_SYMBOLS  = [
@@ -50,9 +52,9 @@ LIVE_SYMBOLS  = [
     "UNI/USDT", "ATOM/USDT", "NEAR/USDT", "LTC/USDT", "DOGE/USDT",
     "TRX/USDT", "ALGO/USDT", "AAVE/USDT", "ARB/USDT", "OP/USDT",
 ]
-LIVE_TIMEFRAME = "12h"
-LIVE_POS_PCT  = 0.10    # 10% du capital par position
-LIVE_MAX_POS  = 10      # 10 positions simultanées max (10×10% = 100% capital max)
+LIVE_TIMEFRAME = "30m"
+LIVE_POS_PCT  = 0.10    # fallback si poids non dispo
+LIVE_MAX_POS  = 10      # 10 positions simultanées max
 
 PARIS_TZ           = ZoneInfo("Europe/Paris")
 DAILY_SUMMARY_HOUR = 9   # heure française (CET/CEST)
@@ -64,6 +66,38 @@ BOT_LOG       = "bot.log"
 
 TELEGRAM_TOKEN   = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+
+
+def _compute_weights(symbols, tf, use_triple_st, use_sma_macd, fg):
+    """Calcule les poids de régularité pondéré-strict (floor=0) pour chaque symbole."""
+    SCORE_YEARS = list(range(2018, 2025))
+    import data_cache as _dc
+    min_y = 2 if tf in ("30m", "1h") else 4
+    scores = {}
+    for sym in symbols:
+        rets = []
+        for year in SCORE_YEARS:
+            df_y = ms.get_df_for_year(sym, tf, year)
+            if df_y is None or len(df_y) < 10:
+                continue
+            r = ms.sim_multi_on_dfs(
+                {sym: df_y}, use_sl=False, fg=fg,
+                use_triple_st=use_triple_st, use_sma_macd=use_sma_macd, tf=tf
+            )
+            ret = r.get("return_%")
+            if ret is not None:
+                rets.append(ret)
+        if len(rets) >= min_y:
+            moy = sum(rets) / len(rets)
+            pct_pos = sum(1 for v in rets if v > 0) / len(rets)
+            scores[sym] = moy * (pct_pos ** 2)
+        else:
+            scores[sym] = 0.0
+    scores_pos = {s: max(scores.get(s, 0.0), 0.0) for s in symbols}
+    total = sum(scores_pos.values())
+    if total == 0:
+        return {s: 1.0 / len(symbols) for s in symbols}
+    return {s: scores_pos[s] / total for s in symbols}
 
 
 class TradingBot:
@@ -78,6 +112,7 @@ class TradingBot:
         self._fg_cache:    dict = {}          # {date -> int}
         self._last_daily_summary: date | None = None
         self._price_cache: dict[str, float] = {}  # pour unrealized PnL
+        self._symbol_weights: dict[str, float] = {}  # poids pondéré-strict
 
         # Chargement du Fear & Greed au démarrage
         try:
@@ -85,22 +120,43 @@ class TradingBot:
         except Exception as e:
             self._log(f"Fear & Greed non chargé ({e}) — veto désactivé", Fore.YELLOW)
 
+        # Calcul des poids de régularité (pondéré-strict)
+        try:
+            self._log("Calcul des poids pondéré-strict...", Fore.CYAN)
+            data_cache.prefetch_all(LIVE_SYMBOLS, [LIVE_TIMEFRAME], verbose=False)
+            for sym in LIVE_SYMBOLS:
+                ms.get_df(sym, LIVE_TIMEFRAME)
+            self._symbol_weights = _compute_weights(
+                LIVE_SYMBOLS, LIVE_TIMEFRAME,
+                use_triple_st=USE_TRIPLE_ST, use_sma_macd=USE_SMA_MACD,
+                fg=self._fg_cache,
+            )
+            self._log(
+                "Poids calculés : " + " | ".join(
+                    f"{s.replace('/USDT','')}: {w*100:.1f}%"
+                    for s, w in sorted(self._symbol_weights.items(),
+                                       key=lambda x: -x[1])[:5]
+                ) + " ...",
+                Fore.CYAN
+            )
+        except Exception as e:
+            self._log(f"Poids non calculés ({e}) — fallback 10%/pos", Fore.YELLOW)
+
         # Shutdown propre sur CTRL+C
         signal.signal(signal.SIGINT,  self._handle_shutdown)
         signal.signal(signal.SIGTERM, self._handle_shutdown)
 
         mode = "PAPER TRADING" if self.paper_trading else "LIVE TRADING"
         self._log(f"Bot démarré — {mode} | Capital: {initial_capital:.2f} USDT | "
-                  f"Stratégie: Top20 / baseline / {LIVE_TIMEFRAME} / "
-                  f"{'sansSL' if not USE_SL else 'avecSL'} / "
-                  f"{int(LIVE_POS_PCT*100)}%/max{LIVE_MAX_POS}",
+                  f"Stratégie: Top20 / +TripleST / {LIVE_TIMEFRAME} / "
+                  f"{'sansSL' if not USE_SL else 'avecSL'} / pondéré-strict",
                   Fore.CYAN)
         self._log(f"Symboles : {LIVE_SYMBOLS} | "
                   f"Fear&Greed veto > {fg_module.FG_GREED_VETO}", Fore.CYAN)
         self._telegram(
             f"[{mode}] Bot démarré\n"
             f"Capital: {initial_capital:.0f} USDT\n"
-            f"Stratégie: Top20 / baseline / {LIVE_TIMEFRAME} / sansSL / 10%/max10\n"
+            f"Stratégie: Top20 / +TripleST / {LIVE_TIMEFRAME} / sansSL / pondéré-strict\n"
             f"Symboles: {', '.join(s.replace('/USDT','') for s in LIVE_SYMBOLS)}"
         )
 
@@ -195,7 +251,8 @@ class TradingBot:
     # Exécution des ordres
     # ------------------------------------------------------------------ #
     def _execute_buy(self, symbol: str, price: float, score: dict):
-        pos = self.risk.open_position(symbol, price)
+        sym_pct = self._symbol_weights.get(symbol) or None
+        pos = self.risk.open_position(symbol, price, pos_pct=sym_pct)
         if pos is None:
             self._log(f"[{symbol}] BUY refusé — capital insuffisant "
                       f"(disponible: {self.risk._available_capital():.2f} USDT)", Fore.YELLOW)

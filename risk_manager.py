@@ -108,15 +108,18 @@ class RiskManager:
     # ------------------------------------------------------------------ #
     # Ouverture de position
     # ------------------------------------------------------------------ #
-    def open_position(self, symbol: str, price: float) -> Position | None:
+    def open_position(self, symbol: str, price: float,
+                      pos_pct: float | None = None) -> Position | None:
         """
         Ouvre une nouvelle position sur le symbole si le capital le permet.
+        pos_pct : fraction du capital à allouer (override de self.pos_pct si fourni).
         Retourne la Position créée, ou None si refusé.
         """
         if not self.can_buy():
             return None
 
-        pos_usdt = self._position_size_usdt()
+        pct      = pos_pct if pos_pct is not None else self.pos_pct
+        pos_usdt = self.total_capital * pct
         size     = pos_usdt / price
         pos      = Position(symbol, price, size,
                             use_sl=self.use_sl, use_tp=self.use_tp)
