@@ -291,10 +291,12 @@ class TradingBot:
             "paper":       self.paper_trading,
         })
         mode_tag = "[PAPER]" if self.paper_trading else "[LIVE]"
+        tp_pct = (pos.take_profit / pos.entry_price - 1) * 100
         self._telegram(
             f"{mode_tag} BUY {symbol}\n"
             f"Prix: {price:.4f} | Taille: {pos.size:.6f}\n"
-            f"Cout: {pos.cost_usdt:.2f} USDT | TP: {pos.take_profit:.4f}\n"
+            f"Alloue: {pos.alloc_pct*100:.1f}% capital ({pos.cost_usdt:.2f} USDT)\n"
+            f"TP: {pos.take_profit:.4f} (+{tp_pct:.1f}%)\n"
             f"Score: {score.get('buy_score')} | F&G: {self._fg_today()}"
         )
 
@@ -334,6 +336,7 @@ class TradingBot:
         self._telegram(
             f"{mode_tag} SELL {symbol} ({reason})\n"
             f"Prix: {price:.4f} | Duree: {duration_min:.0f}min\n"
+            f"Alloue: {pos.alloc_pct*100:.1f}% capital ({pos.cost_usdt:.2f} USDT)\n"
             f"PnL: {pnl_sign}{result['pnl_usdt']:.4f} USDT ({pnl_sign}{result['pnl_pct']:.2f}%)\n"
             f"Capital: {self.risk.total_capital:.2f} USDT"
         )
@@ -374,6 +377,15 @@ class TradingBot:
                 "duration_min": duration_min,
                 "paper":        self.paper_trading,
             })
+            mode_tag = "[PAPER]" if self.paper_trading else "[LIVE]"
+            pnl_sign = "+" if result["pnl_usdt"] >= 0 else ""
+            self._telegram(
+                f"{mode_tag} SELL {symbol} ({reason})\n"
+                f"Prix: {price:.4f} | Duree: {duration_min:.0f}min\n"
+                f"Alloue: {pos.alloc_pct*100:.1f}% capital ({pos.cost_usdt:.2f} USDT)\n"
+                f"PnL: {pnl_sign}{result['pnl_usdt']:.4f} USDT ({pnl_sign}{result['pnl_pct']:.2f}%)\n"
+                f"Capital: {self.risk.total_capital:.2f} USDT"
+            )
 
     # ------------------------------------------------------------------ #
     # Traitement d'un symbole
@@ -554,13 +566,15 @@ class TradingBot:
         mode_tag   = "[PAPER]" if self.paper_trading else "[LIVE]"
         today_str  = datetime.now(PARIS_TZ).strftime("%d/%m/%Y")
 
+        total_value = summary['capital'] + summary['deployed'] + unreal_pnl
         lines = [
             f"{mode_tag} RESUME DU JOUR — {today_str}",
             f"",
+            f"Valeur totale: {total_value:.2f} USDT",
             f"Capital: {summary['capital']:.2f} USDT",
             f"Deploye: {summary['deployed']:.2f} USDT",
-            f"Positions ouvertes: {summary['open_positions']}",
             f"PnL non realise: {unreal_pnl:+.2f} USDT",
+            f"Positions ouvertes: {summary['open_positions']}",
             f"",
             f"Depuis le demarrage:",
             f"Trades: {n_trades} | PnL realise: {total_pnl:+.2f} USDT | WR: {win_rate:.0f}%",

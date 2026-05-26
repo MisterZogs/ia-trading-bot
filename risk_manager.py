@@ -21,6 +21,7 @@ class Position:
         self.entry_price = entry_price
         self.size        = size
         self.entry_fee   = entry_price * size * FEE_RATE
+        self.alloc_pct   = 0.0  # fraction du capital allouée (ex: 0.05 = 5%)
 
         risk = config.SYMBOL_RISK.get(symbol, {
             "sl": config.STOP_LOSS_PCT,
@@ -123,6 +124,7 @@ class RiskManager:
         size     = pos_usdt / price
         pos      = Position(symbol, price, size,
                             use_sl=self.use_sl, use_tp=self.use_tp)
+        pos.alloc_pct = pct
 
         # Déduire les fees d'entrée du capital disponible
         self.total_capital -= pos.entry_fee
@@ -165,7 +167,7 @@ class RiskManager:
                 del self.positions[symbol]
 
         pnl_usdt = pos.pnl(exit_price)
-        self.total_capital += pos.cost_usdt + pnl_usdt
+        self.total_capital += pnl_usdt
 
         return {
             "symbol":   symbol,
