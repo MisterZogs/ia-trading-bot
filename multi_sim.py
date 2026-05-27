@@ -466,23 +466,34 @@ def sim_concentration(dfs: dict, pos_pct: float, max_trades: int,
                       fg: dict | None = None,
                       use_triple_st: bool = False, use_sma_macd: bool = False,
                       use_sl: bool = False, tf: str | None = None,
-                      single: bool = False) -> dict:
+                      single: bool = False,
+                      use_tp: bool = True,
+                      tp_pct: float | None = None,
+                      atr_tp: bool = False,
+                      precomputed_sigs: dict | None = None) -> dict:
     """
     Multi-position avec limite globale de trades simultanés et taille de
     position fixe en % du capital.
 
-    pos_pct    : fraction du capital par trade (ex. 0.10 = 10%)
-    max_trades : nombre max de positions ouvertes simultanément (tous symboles)
-    use_sl     : activer le stop-loss fixe (par défaut False = sansSL)
-    single     : si True, au plus 1 position ouverte par symbole (mode 1pos)
+    pos_pct          : fraction du capital par trade (ex. 0.10 = 10%)
+    max_trades       : nombre max de positions ouvertes simultanément (tous symboles)
+    use_sl           : activer le stop-loss fixe (par défaut False = sansSL)
+    single           : si True, au plus 1 position ouverte par symbole (mode 1pos)
+    use_tp           : False = pas de TP (sortie sur signal SELL ou SL uniquement)
+    tp_pct           : TP fixe uniforme pour tous les symboles (ex: 0.10 = 10%)
+    atr_tp           : TP dynamique = entrée + ATR_TP_MULT × ATR
+    precomputed_sigs : signaux déjà calculés {symbol: np.array} — évite le recalcul
     """
     import math
     if not dfs:
         return {}
 
-    sigs  = {s: indicators.vectorized_signals(
-        dfs[s], use_triple_st=use_triple_st, use_sma_macd=use_sma_macd).values
-        for s in dfs}
+    if precomputed_sigs is not None:
+        sigs = {s: precomputed_sigs[s] for s in dfs if s in precomputed_sigs}
+    else:
+        sigs = {s: indicators.vectorized_signals(
+            dfs[s], use_triple_st=use_triple_st, use_sma_macd=use_sma_macd).values
+            for s in dfs}
 
     arr_low   = {s: dfs[s]["low"].values   for s in dfs}
     arr_high  = {s: dfs[s]["high"].values  for s in dfs}
@@ -544,11 +555,20 @@ def sim_concentration(dfs: dict, pos_pct: float, max_trades: int,
                     capital -= pos_val * FEE_RATE
                     size    = pos_val / close
                     initial_sl = close * (1 - risk["sl"]) if use_sl else 0.0
+                    if not use_tp:
+                        tp_price = math.inf
+                    elif atr_tp and not math.isnan(atr) and atr > 0:
+                        tp_price = close + config.ATR_TP_MULT * atr
+                        tp_price = max(tp_price, close * (1 + config.ATR_TP_MIN_PCT))
+                    elif tp_pct is not None:
+                        tp_price = close * (1 + tp_pct)
+                    else:
+                        tp_price = close * (1 + risk["tp"])
                     positions[symbol].append({
                         "entry":   close,
                         "size":    size,
                         "sl":      initial_sl,
-                        "tp":      close * (1 + risk["tp"]),
+                        "tp":      tp_price,
                         "entry_i": i,
                     })
                     total_open += 1
@@ -587,6 +607,8 @@ def sim_multi_on_dfs(dfs: dict, use_sl: bool, fg: dict | None = None,
                      use_regime_filter: bool = False,
                      atr_sizing: bool = False,
                      atr_tp: bool = False,
+                     use_tp: bool = True,
+                     tp_pct: float | None = None,
                      precomputed_sigs: dict | None = None,
                      tf: str | None = None) -> dict:
     """
@@ -603,6 +625,9 @@ def sim_multi_on_dfs(dfs: dict, use_sl: bool, fg: dict | None = None,
     use_regime_filter : bloquer les BUY si ADX > 25 (marché en tendance forte)
     atr_sizing        : taille de position adaptée à la volatilité ATR courante
     atr_tp            : take-profit dynamique = entrée + ATR_TP_MULT × ATR
+    use_tp            : False = pas de TP (sortie sur signal SELL ou SL uniquement)
+    tp_pct            : TP fixe uniforme pour tous les symboles (ex: 0.10 = 10%)
+                        priorité sur SYMBOL_RISK si fourni ; ignoré si atr_tp=True ou use_tp=False
     """
     import math
     if not dfs:
@@ -687,10 +712,14 @@ def sim_multi_on_dfs(dfs: dict, use_sl: bool, fg: dict | None = None,
                 capital -= pos_val * FEE_RATE
                 size     = pos_val / close
 
-                # --- Take-Profit dynamique basé sur l'ATR ---
-                if atr_tp and not math.isnan(atr) and atr > 0:
+                # --- Take-Profit ---
+                if not use_tp:
+                    tp_price = math.inf
+                elif atr_tp and not math.isnan(atr) and atr > 0:
                     tp_price = close + config.ATR_TP_MULT * atr
                     tp_price = max(tp_price, close * (1 + config.ATR_TP_MIN_PCT))
+                elif tp_pct is not None:
+                    tp_price = close * (1 + tp_pct)
                 else:
                     tp_price = close * (1 + risk["tp"])
 
