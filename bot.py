@@ -566,7 +566,7 @@ class TradingBot:
         mode_tag   = "[PAPER]" if self.paper_trading else "[LIVE]"
         today_str  = datetime.now(PARIS_TZ).strftime("%d/%m/%Y")
 
-        total_value = summary['capital'] + summary['deployed'] + unreal_pnl
+        total_value = summary['capital'] + unreal_pnl
         lines = [
             f"{mode_tag} RESUME DU JOUR — {today_str}",
             f"",
