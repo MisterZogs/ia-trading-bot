@@ -246,7 +246,13 @@ class TradingBot:
     # Fear & Greed
     # ------------------------------------------------------------------ #
     def _fg_today(self) -> int | None:
-        return self._fg_cache.get(date.today())
+        today = date.today()
+        if today not in self._fg_cache:
+            try:
+                self._fg_cache = fg_module.load(verbose=False)
+            except Exception:
+                pass
+        return self._fg_cache.get(today)
 
     # ------------------------------------------------------------------ #
     # Exécution des ordres
