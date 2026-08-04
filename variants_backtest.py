@@ -270,18 +270,42 @@ def stats(trades, capital, equity, fees, refused, unclosed, label):
 # --------------------------------------------------------------------------- #
 # Données et poids
 # --------------------------------------------------------------------------- #
+# Colonnes réellement utilisées par gen_signals / simulate / multi_sim.
+# Tout garder fait ~500 Mo par jeu de 20 symboles et envoie la machine en swap.
+KEEP_COLS = [
+    "timestamp", "open", "high", "low", "close", "volume",
+    "rsi", "sma_fast", "sma_slow", "macd", "macd_signal", "stoch_k",
+    "bb_lower", "bb_upper", "volume_sma", "st_dir_7", "st_dir_21",
+    "sma200", "atr",
+]
+
 _DF_CACHE = {}
 
 
+def _slim(df):
+    cols = [c for c in KEEP_COLS if c in df.columns]
+    out = df[cols].copy()
+    for c in out.columns:
+        if out[c].dtype == "float64":
+            out[c] = out[c].astype("float32")
+    return out
+
+
 def load_dfs(symbols, start=None, end=None, warmup_bars=250):
-    """DFs avec indicateurs, tronqués sur [start, end] avec warmup pour SMA200."""
+    """
+    DFs avec indicateurs, tronqués sur [start, end] avec warmup pour SMA200.
+    Partage le cache de multi_sim (ms._ind_cache) : sans ça les indicateurs sont
+    calculés et stockés deux fois (ici + compute_weights), ce qui sature la RAM.
+    """
     out = {}
     for s in symbols:
         if s not in _DF_CACHE:
             try:
                 raw = data_cache.fetch_ohlcv(s, TIMEFRAME, verbose=False)
                 df  = indicators.compute_all(raw.reset_index())
-                _DF_CACHE[s] = df.dropna().reset_index(drop=True)
+                df  = _slim(df).dropna().reset_index(drop=True)
+                _DF_CACHE[s] = df
+                ms._ind_cache[f"{s}_{TIMEFRAME}"] = df   # évite le 2e calcul
             except Exception as e:
                 print(f"  [err] {s}: {e}")
                 _DF_CACHE[s] = None
