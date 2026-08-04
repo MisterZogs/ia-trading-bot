@@ -312,7 +312,8 @@ def compute_weights(symbols, fg, max_year):
     """
     years = [y for y in range(2018, max_year)]
     scores = {}
-    for s in symbols:
+    for i_s, s in enumerate(symbols, 1):
+        print(f"    [{i_s}/{len(symbols)}] {s}", flush=True)
         rets = []
         for y in years:
             df_y = ms.get_df_for_year(s, TIMEFRAME, y)
