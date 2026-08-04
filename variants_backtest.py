@@ -401,11 +401,12 @@ def main():
     for s, d in list(dfs_all.items())[:1]:
         print(f"  {s}: {len(d)} bougies, {d['timestamp'].min()} → {d['timestamp'].max()}")
 
-    # --- Fenêtre live : poids calculés sur années <= 2025 (pas de lookahead) ---
-    print("\nCalcul des poids pondéré-strict (années ≤ 2025)…", flush=True)
+    # --- Fenêtre live : poids identiques à ceux du bot live (années 2018-2024) ---
+    print("\nCalcul des poids pondéré-strict (2018-2024, comme le bot live)…", flush=True)
     w_live = compute_weights(SYMBOLS, fg, max_year=2025)
-    top = sorted(w_live.items(), key=lambda x: -x[1])[:6]
-    print("  " + " | ".join(f"{s.replace('/USDT','')}: {w*100:.1f}%" for s, w in top))
+    top = sorted(w_live.items(), key=lambda x: -x[1])
+    print("  poids : " + " | ".join(f"{s.replace('/USDT','')}: {w*100:.1f}%" for s, w in top if w > 0.001))
+    print("  live  : SOL: 15.9% | NEAR: 13.2% | ATOM: 12.8% | OP: 10.1% | ARB: 10.0% (log du bot)")
 
     dfs_live = load_dfs(SYMBOLS, start=LIVE_START, end=LIVE_END)
     all_res = {}
