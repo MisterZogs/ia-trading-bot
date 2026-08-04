@@ -303,8 +303,14 @@ def load_dfs(symbols, start=None, end=None, warmup_bars=250):
 
 
 def compute_weights(symbols, fg, max_year):
-    """Poids pondéré-strict — réplique bot._compute_weights, années <= max_year."""
-    years = [y for y in range(2018, max_year + 1)]
+    """
+    Poids pondéré-strict — réplique EXACTE de bot._compute_weights.
+    Le bot live utilise SCORE_YEARS = range(2018, 2025), donc années < max_year
+    (2025 exclu pour la fenêtre live). Toute déviation change radicalement les
+    poids : inclure 2025 (année très négative) fait exploser le poids relatif
+    de MATIC, qui n'a plus de données après sept. 2024.
+    """
+    years = [y for y in range(2018, max_year)]
     scores = {}
     for s in symbols:
         rets = []
